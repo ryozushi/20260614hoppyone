@@ -23,6 +23,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import discord
 from discord.ext import commands
 
+import anthropic
+
 # -------------------------------------------------------------
 # 【1】 トークン（合言葉）
 #   ・クラウド(Koyeb)では環境変数 DISCORD_TOKEN から自動で読み込みます。
@@ -30,6 +32,31 @@ from discord.ext import commands
 #   ※トークンは「Botのパスワード」。誰にも教えないこと。
 # -------------------------------------------------------------
 TOKEN = os.environ.get("DISCORD_TOKEN", "ここにあなたのトークンを貼り付け")
+
+# -------------------------------------------------------------
+# 【1-b】 AI会話用のカギ（任意）
+#   ・@HoppyOne とメンションされたら、AI(Claude)が口語で返事します。
+#   ・クラウドの環境変数 ANTHROPIC_API_KEY を入れた時だけ有効になります。
+#   ・キーが無ければ、この機能は静かにOFF（コマンドは今まで通り動く）。
+#   ※キーはトークンと同じく秘密。コードに直書きしない・GitHubに置かない。
+# -------------------------------------------------------------
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+ai_client = anthropic.AsyncAnthropic() if ANTHROPIC_API_KEY else None
+
+# HoppyOneの“人格”。AIはこの設定になりきって返事します。
+HOPPY_PERSONA = (
+    "あなたは「HoppyOne（ホッピーワン）」。"
+    "デジタル原っぱ大学という、非エンジニアがAIとVibe Codingする1ヶ月スプリントの"
+    "コミュニティ専属の、親しみやすくフレンドリーな“原っぱの相棒”Botです。\n"
+    "【口調】ていねいだけど砕けた、温かい応援トーン。絵文字を適度に使う🌱\n"
+    "【役割】メンバーが手を動かした記録を残し、互いを励まし、"
+    "デプロイ（自分の手でURLを生む）へ背中を押す。\n"
+    "【価値観】完成度は問わない・とにかく手を動かす／試行錯誤のログを共有する実験場。\n"
+    "【返答ルール】日本語で、短め（2〜4文）。技術の質問には簡潔に答えつつ、"
+    "最後にやさしく一歩を後押しする。わからない時は正直に言う。\n"
+    "メンバーは `!log` で記録、`!cheer` で励まし、`!mylog` で振り返りができます。"
+    "文脈に合えば軽く案内してOK。"
+)
 
 # 日本時間(JST)で日付を表示するための設定（触らなくてOK）
 JST = timezone(timedelta(hours=9))
@@ -172,9 +199,55 @@ async def help_command(ctx):
         "`!help`       … この一覧\n"
         "\n🇯🇵 **日本語コマンドもOK！**（半角!でも全角！でも反応するよ）\n"
         "`！記録 [内容]` `！マイログ` `！応援` `！ヘルプ` … 上の英語版と同じ意味で使えます\n"
+        "\n💬 **おしゃべりもできるよ！** `@HoppyOne` と話しかければ、相談や雑談に返事するよ🌱\n"
         "\n完成度は問わない。まず手を動かそう。応援してるよ🔥"
     )
     await ctx.send(text)
+
+
+# -------------------------------------------------------------
+# 【4-b】 口語でAI会話（@メンションされた時だけ）
+#   ・課金を抑えるため「@HoppyOne と名指しされた時だけ」反応します。
+#   ・ANTHROPIC_API_KEY が未設定なら、この機能は動かず通常コマンドだけ動きます。
+# -------------------------------------------------------------
+async def _reply_with_ai(message):
+    # メンション部分(<@123…>)を除いた、人が読める本文を取り出す
+    user_text = message.clean_content.replace(f"@{bot.user.display_name}", "").strip()
+    if not user_text:
+        await message.reply(
+            "やあ！呼んでくれてありがとう🌱 困りごとや今日の進捗、気軽に話しかけてね。"
+            "（記録は `!log`、励ましは `!cheer` だよ）"
+        )
+        return
+    try:
+        async with message.channel.typing():
+            resp = await ai_client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=600,
+                system=HOPPY_PERSONA,
+                messages=[
+                    {"role": "user", "content": f"{message.author.display_name}さん: {user_text}"}
+                ],
+            )
+        reply = "".join(b.text for b in resp.content if b.type == "text").strip()
+        await message.reply(reply[:1900] if reply else "うまく言葉が出てこなかった…もう一度話しかけてみて🙏")
+    except anthropic.AuthenticationError:
+        await message.reply("ごめん、AIのカギ（APIキー）の設定がうまくいってないみたい。コーチに教えてあげて🔑")
+    except Exception:
+        await message.reply("ごめん、いまAIの調子が悪いみたい…少し待ってまた話しかけてね🙏")
+
+
+@bot.event
+async def on_message(message):
+    # 自分や他のBotには反応しない（無限ループ防止）
+    if message.author.bot:
+        return
+    # @HoppyOne と名指しされ、AIのカギがあれば、口語で会話する
+    if ai_client is not None and bot.user in message.mentions:
+        await _reply_with_ai(message)
+        return
+    # それ以外は、通常のコマンド処理(!log など)を続行する（この行は消さないこと）
+    await bot.process_commands(message)
 
 
 # -------------------------------------------------------------
