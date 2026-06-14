@@ -34,6 +34,12 @@ TOKEN = os.environ.get("DISCORD_TOKEN", "ここにあなたのトークンを貼
 # 日本時間(JST)で日付を表示するための設定（触らなくてOK）
 JST = timezone(timedelta(hours=9))
 
+# !mylog がログを拾うときに探す「合言葉」の一覧。
+# 半角!/全角！ × log/ログ/記録 の全組み合わせを自動で作ります（日本語コマンド対応）。
+LOG_PREFIXES = tuple(
+    f"{mark}{word} " for mark in ("!", "！") for word in ("log", "ログ", "記録")
+)
+
 
 # -------------------------------------------------------------
 # 【おまけ】 無料クラウドで「眠らせない」ための小さな窓口（触らない）
@@ -76,8 +82,8 @@ async def on_ready():
 # 【4】 コマンド本体
 # -------------------------------------------------------------
 
-# --- 試行錯誤ログを記録 ---  使い方: !log 今日やったこと
-@bot.command(name="log")
+# --- 試行錯誤ログを記録 ---  使い方: !log 今日やったこと（日本語: ！記録 / ！ログ もOK）
+@bot.command(name="log", aliases=["ログ", "記録"])
 async def log_command(ctx, *, content: str = ""):
     if not content.strip():
         await ctx.send(
@@ -92,8 +98,8 @@ async def log_command(ctx, *, content: str = ""):
     )
 
 
-# --- 自分のログを振り返る ---  使い方: !mylog
-@bot.command(name="mylog")
+# --- 自分のログを振り返る ---  使い方: !mylog（日本語: ！マイログ / ！振り返り もOK）
+@bot.command(name="mylog", aliases=["マイログ", "振り返り", "ふりかえり"])
 async def mylog_command(ctx):
     # このチャンネルの履歴から、自分が打った「!log ...」を拾い集めます。
     found = []
@@ -101,8 +107,8 @@ async def mylog_command(ctx):
         if msg.author.id != ctx.author.id:
             continue
         text = msg.content.strip()
-        # "!log 〜" または "！log 〜"(全角!)で始まるメッセージを対象に
-        for prefix in ("!log ", "！log "):
+        # "!log 〜" や "！記録 〜" など、ログ用の合言葉で始まるメッセージを対象に
+        for prefix in LOG_PREFIXES:
             if text.startswith(prefix):
                 body = text[len(prefix):].strip()
                 date = msg.created_at.astimezone(JST).strftime("%-m/%-d")
@@ -127,8 +133,8 @@ async def mylog_command(ctx):
     )
 
 
-# --- 励ましガチャ ---  使い方: !cheer
-@bot.command(name="cheer")
+# --- 励ましガチャ ---  使い方: !cheer（日本語: ！応援 もOK）
+@bot.command(name="cheer", aliases=["応援", "おうえん", "励まし"])
 async def cheer_command(ctx):
     messages = [
         "とにかくやってみること。それがすべて。まず1行、手を動かそう🔥",
@@ -147,14 +153,14 @@ async def cheer_command(ctx):
     await ctx.send(f"🎁 **今日のひと押し**\n{random.choice(messages)}")
 
 
-# --- 動作確認（おまけ） ---  使い方: !ping
-@bot.command(name="ping")
+# --- 動作確認（おまけ） ---  使い方: !ping（日本語: ！ピン もOK）
+@bot.command(name="ping", aliases=["ピン", "ぴん"])
 async def ping_command(ctx):
     await ctx.send(f"pong! 元気に動いてるよ（応答 {round(bot.latency*1000)}ms）")
 
 
-# --- 使い方一覧 ---  使い方: !help
-@bot.command(name="help")
+# --- 使い方一覧 ---  使い方: !help（日本語: ！ヘルプ / ！使い方 もOK）
+@bot.command(name="help", aliases=["ヘルプ", "へるぷ", "使い方"])
 async def help_command(ctx):
     text = (
         "**やあ！HoppyOne だよ🌱 原っぱのなかまBotです。**\n"
@@ -164,6 +170,8 @@ async def help_command(ctx):
         "`!cheer`      … 手が止まったら…コーチ風の励ましをひとつ\n"
         "`!ping`       … ちゃんと動いてるか確認\n"
         "`!help`       … この一覧\n"
+        "\n🇯🇵 **日本語コマンドもOK！**（半角!でも全角！でも反応するよ）\n"
+        "`！記録 [内容]` `！マイログ` `！応援` `！ヘルプ` … 上の英語版と同じ意味で使えます\n"
         "\n完成度は問わない。まず手を動かそう。応援してるよ🔥"
     )
     await ctx.send(text)
